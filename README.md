@@ -32,6 +32,8 @@ To make sure the changes are effective, flush the DNS cache using the following 
 ipconfig /flushdns
 ```
 
+If the BeyondATC still receives the live weather after you finalize the installation, consider to reboot to flush all DNS caches.
+
 ### Step 3.1: Generate certificate
 
 To make BeyondATC think it is still talking to aviationweather.gov, we need to create a https certificate. It would be potentially hazardous to publish it, therefore you have to generate your own, as follows.
@@ -69,7 +71,7 @@ and monitor the installation is successful.
 
 ## Usage
 
-Before starting BeyondATC (ActiveSky should already run), start a command line terminal, navigate repository folder, run 
+Before starting ActiveSky and BeyondATC, start a command line terminal, navigate repository folder, run 
 ```
 python main.py
 ```
