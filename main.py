@@ -31,17 +31,17 @@ wind_data = {}
 # FastAPI application
 app = FastAPI()
 
-def generate_xml(metars):
+def generate_xml(metars, datasource="metars"):
     try:
         # Root of the XML document
         root = ET.Element("response", attrib={
             "xmlns:xsd": "http://www.w3.org/2001/XMLSchema",
             "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
             "version": "1.3",
-            "xsi:noNamespaceSchemaLocation": "https://aviationweather.gov/data/schema/metar1_3.xsd",
+            "xsi:noNamespaceSchemaLocation": f"https://aviationweather.gov/data/schema/{datasource[:-1]}1_3.xsd",
         })
         ET.SubElement(root, "request_index").text = str(int(datetime.now().timestamp()))
-        ET.SubElement(root, "data_source", attrib={"name": "metars"})
+        ET.SubElement(root, "data_source", attrib={"name": datasource})
         ET.SubElement(root, "request", attrib={"type": "retrieve"})
         ET.SubElement(root, "errors")
         ET.SubElement(root, "warnings")
@@ -51,14 +51,20 @@ def generate_xml(metars):
         for metar_text in metars.values():
             try:
                 # Parse data
-                with warnings.catch_warnings(action="ignore"):
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
                     metar = Metar.Metar(metar_text, strict=False)
-                metar_element = ET.SubElement(data, "METAR")
-                ET.SubElement(metar_element, "raw_text").text = metar.code
+                metar_element = ET.SubElement(data, datasource[:-1].upper())
+                if (datasource == "tafs"):
+                    metar_text = "TAF " + metar_text
+                ET.SubElement(metar_element, "raw_text").text = metar_text
                 ET.SubElement(metar_element, "station_id").text = metar.station_id
-                #ET.SubElement(metar_element, "observation_time").text = metar.time.isoformat() + "Z"
-                #ET.SubElement(metar_element, "latitude").text = ""
-                #ET.SubElement(metar_element, "longitude").text = ""
+                if (datasource == "tafs"):
+                    ET.SubElement(metar_element, "issue_time").text = metar.time.isoformat() + "Z"
+                else:
+                    ET.SubElement(metar_element, "observation_time").text = metar.time.isoformat() + "Z"
+                ET.SubElement(metar_element, "latitude").text = ""
+                ET.SubElement(metar_element, "longitude").text = ""
                 if (metar.temp):
                     ET.SubElement(metar_element, "temp_c").text = str(int(round(metar.temp.value("C"))))
                 if (metar.dewpt):
@@ -97,7 +103,6 @@ def generate_xml(metars):
                 else:
                     fc_element.text = "LIFR"
 
-                ET.SubElement(metar_element, "flight_category").text = ""
                 if (metar.precip_1hr):
                     ET.SubElement(metar_element, "precip_in").text = str(round(metar.precip_1hr.value("IN"), 3))
                 if (metar.precip_3hr):
@@ -109,7 +114,7 @@ def generate_xml(metars):
                 ET.SubElement(metar_element, "metar_type").text = "METAR"
                 #ET.SubElement(metar_element, "elevation_m").text = ""
             except Exception as e:
-                print(f"Error parsing METAR: {metar_text.strip()} - {e}")
+                print(f"Error parsing METAR/TAF: {metar_text.strip()} - {e}")
 
         # Return XML data
         tree = ET.ElementTree(root)
@@ -157,19 +162,19 @@ async def get_metar_cache():
 @app.get("/cgi-bin/data/dataserver")
 async def request_data(request: Request):
     """Serves specific METARs"""
-    if (request.query_params["format"] == "xml"):
-        stationString = request.query_params["stationString"]
-        if (request.query_params["dataSource"] == "metars"):
+    if (request.query_params["format"].lower() == "xml"):
+        stationString = request.query_params["stationString"].lower()
+        if (request.query_params["dataSource"].lower() == "metars"):
             if stationString in metar_data:
                 print(f"Serving METAR for {stationString}...")
                 tree = generate_xml({stationString: metar_data[stationString]})
-                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200)
+                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200, media_type="application/xml")
             
         if (request.query_params["dataSource"] == "tafs"):
             if stationString in taf_data:
                 print(f"Serving TAF for {stationString}...")
-                tree = generate_xml({stationString: taf_data[stationString]})
-                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200)
+                tree = generate_xml({stationString: taf_data[stationString]}, "tafs")
+                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200, media_type="application/xml")
             
     # Fallback
     return await aviationweather_proxy(request, "cgi-bin/data/dataserver.php")
@@ -180,7 +185,8 @@ async def aviationweather_proxy(request: Request, path_name: str):
     session = requests.Session()
     session.mount('https://', host_header_ssl.HostHeaderSSLAdapter())
     print(f"Getting data from https://{aviationweather_IP}/{path_name}...")
-    with warnings.catch_warnings(action="ignore"):
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
         resp = session.get(f"https://{aviationweather_IP}/{path_name}", headers={"Host": "aviationweather.gov"}, params=request.query_params, verify=False)
 
     return Response(content=resp.content, status_code=resp.status_code)
@@ -200,19 +206,21 @@ async def watch_metar_file():
 
 def find_aviationweather_IP():
     print("Looking up actual aviationweather.gov IP...")
-
+    
+    # Use Google's DNS server directly to bypass local DNS
+    nslookup_data = subprocess.check_output(["nslookup", "aviationweather.gov", "1.1.1.1"]).decode().split("\n")
+    
     ip = ""
-    nslookup_data = subprocess.check_output(["nslookup", "aviationweather.gov"]).decode().split("\n")
     for line in nslookup_data:
         if "Address" in line:
-            if "." in line: # To exclude IPv6
+            if "1.1.1.1" not in line and "." in line:  # Exclude DNS server address and IPv6
                 ip = line.split(" ")[-1].strip()
                 print(f"Found IP: {ip}")
                 break
 
-    if (ip == ""):
+    if ip == "":
         print("No IP could be found!")
-
+        
     return ip
 
 async def main():

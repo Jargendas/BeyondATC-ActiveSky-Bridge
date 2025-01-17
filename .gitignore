@@ -169,3 +169,9 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Certificate files
+*.pem
+
+# Metar files
+*.xml.gz
