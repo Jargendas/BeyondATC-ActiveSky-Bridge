@@ -14,11 +14,13 @@ from metar import Metar
 from datetime import datetime
 import xml.etree.ElementTree as ET
 
-# Paths
-METAR_FILE = Path(Path.home() / "AppData/Roaming/HiFi/AS_FS/Weather/current_wx_snapshot.txt")
-CACHE_FILE = Path("metars.cache.xml.gz")
-CERT_FILE = Path("cert.pem")
-KEY_FILE = Path("key.pem")
+# Constants
+METAR_FILE = Path(Path.home() / "AppData/Roaming/HiFi/AS_FS/Weather/current_wx_snapshot.txt") # Path to your ActiveSky weather snapshot file
+CERT_FILE = Path("cert.pem") # Cert file for https certificate
+KEY_FILE = Path("key.pem") # Key file for https certificate
+DNS_IP = "1.1.1.1" # Path to a DNS server of your choice to look up the actual IP of aviationweather.gov
+
+CACHE_FILE = Path("metars.cache.xml.gz") # Name of the cache file to be provided to BeyondATC - should not be changed
 
 # Actual aviationweather.gov IP - will be requested automatically
 aviationweather_IP = ""
@@ -208,12 +210,12 @@ def find_aviationweather_IP():
     print("Looking up actual aviationweather.gov IP...")
     
     # Use Google's DNS server directly to bypass local DNS
-    nslookup_data = subprocess.check_output(["nslookup", "aviationweather.gov", "1.1.1.1"]).decode().split("\n")
+    nslookup_data = subprocess.check_output(["nslookup", "aviationweather.gov", DNS_IP]).decode().split("\n")
     
     ip = ""
     for line in nslookup_data:
         if "Address" in line:
-            if "1.1.1.1" not in line and "." in line:  # Exclude DNS server address and IPv6
+            if DNS_IP not in line and "." in line:  # Exclude DNS server address and IPv6
                 ip = line.split(" ")[-1].strip()
                 print(f"Found IP: {ip}")
                 break
