@@ -61,10 +61,11 @@ def generate_xml(metars, datasource="metars"):
                     metar_text = "TAF " + metar_text
                 ET.SubElement(metar_element, "raw_text").text = metar_text
                 ET.SubElement(metar_element, "station_id").text = metar.station_id
-                if (datasource == "tafs"):
-                    ET.SubElement(metar_element, "issue_time").text = metar.time.isoformat() + "Z"
-                else:
-                    ET.SubElement(metar_element, "observation_time").text = metar.time.isoformat() + "Z"
+                if (metar.time):
+                    if (datasource == "tafs"):
+                        ET.SubElement(metar_element, "issue_time").text = metar.time.isoformat() + "Z"
+                    else:
+                        ET.SubElement(metar_element, "observation_time").text = metar.time.isoformat() + "Z"
                 ET.SubElement(metar_element, "latitude").text = ""
                 ET.SubElement(metar_element, "longitude").text = ""
                 if (metar.temp):
