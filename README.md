@@ -65,7 +65,7 @@ Copy both the `cert.crt` and the `cert.key` files to the downloaded repository f
 
 Open a command line terminal and navigate to the folder of the downloaded project using the `cd` command. Once there, execute 
 ```
-pip install requirements.txt
+pip install -r requirements.txt
 ``` 
 and monitor the installation is successful.
 
