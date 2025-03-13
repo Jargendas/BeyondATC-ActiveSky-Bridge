@@ -54,7 +54,7 @@ To be accepted by BeyondATC, the certificate must be installed into the machine 
 
 - Double-click the downloaded ```cert.crt``` file.
 - In the window that opens, click `Install Certificate...`, then select `Local Machine` for store location and click `Next`. 
-- On the following page, select `Place all certificates in the following store`, click `Browse...` and select `Third-Party Root Certification Authorities`. 
+- On the following page, select `Place all certificates in the following store`, click `Browse...` and select `Trusted  Root Certification Authorities`. 
 - Click `OK` and `Next`. If everything worked, it should show `The import was successful.`.
 
 ### Step 3.3: Copy and rename certificate files
