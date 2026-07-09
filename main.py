@@ -4,6 +4,7 @@ import warnings
 import subprocess
 import requests
 import io
+import json
 from requests_toolbelt.adapters import host_header_ssl
 from uvicorn import Config, Server
 from pathlib import Path
@@ -130,6 +131,42 @@ def generate_xml(metars, datasource="metars"):
 
     return None
 
+def generate_json(metars_dict):
+    """Generates a JSON response compatible with the new AviationWeather API."""
+    data = []
+    for station_id, metar_text in metars_dict.items():
+        try:
+            # Parse to extract basic fields needed for the JSON object
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                metar_obj = Metar.Metar(metar_text, strict=False)
+            
+            json_entry = {
+                "metar_id": 0, 
+                "icaoId": station_id.upper(),
+                "receiptTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "obsTime": (metar_obj.time.isoformat() + "Z") if metar_obj.time else None,
+                "reportTime": (metar_obj.time.isoformat() + "Z") if metar_obj.time else None,
+                "temp": metar_obj.temp.value("C") if metar_obj.temp else None,
+                "dewp": metar_obj.dewpt.value("C") if metar_obj.dewpt else None,
+                "wdir": metar_obj.wind_dir.value() if metar_obj.wind_dir else None,
+                "wspd": metar_obj.wind_speed.value("KT") if metar_obj.wind_speed else None,
+                "visib": metar_obj.vis.value("MI") if metar_obj.vis else None,
+                "altim": metar_obj.press.value("IN") if metar_obj.press else None,
+                "rawOb": metar_text,  # Critical: Fenix EFB relies on this
+                "station": {
+                    "icaoId": station_id.upper(),
+                    "name": station_id.upper() 
+                }
+            }
+            data.append(json_entry)
+        except Exception as e:
+            print(f"Error generating JSON for {station_id}: {e}")
+            # Fallback: send raw text wrapped
+            data.append({"icaoId": station_id.upper(), "rawOb": metar_text})
+            
+    return data
+
 def parse_current_wx_file(filepath: Path) -> None:
     """Parses the current_wx file from ActiveSky and generates a gzipped XML file."""
     
@@ -163,24 +200,60 @@ async def get_metar_cache():
 
 @app.get("/cgi-bin/data/dataserver.php")
 @app.get("/cgi-bin/data/dataserver")
+@app.get("/api/data/metar") # Capture new API
+@app.get("/api/data/taf")   # Capture new API TAFs
 async def request_data(request: Request):
-    """Serves specific METARs"""
-    if (request.query_params["format"].lower() == "xml"):
-        stationString = request.query_params["stationString"].lower()
-        if (request.query_params["dataSource"].lower() == "metars"):
-            if stationString in metar_data:
-                print(f"Serving METAR for {stationString}...")
-                tree = generate_xml({stationString: metar_data[stationString]})
-                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200, media_type="application/xml")
-            
-        if (request.query_params["dataSource"] == "tafs"):
-            if stationString in taf_data:
-                print(f"Serving TAF for {stationString}...")
-                tree = generate_xml({stationString: taf_data[stationString]}, "tafs")
-                return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200, media_type="application/xml")
-            
-    # Fallback
-    return await aviationweather_proxy(request, "cgi-bin/data/dataserver.php")
+    """Serves specific METARs/TAFs for both Old (XML) and New (JSON) APIs."""
+    
+    # 1. IDENTIFY THE REQUESTED STATIONS
+    # New API uses 'ids', Old API uses 'stationString'
+    requested_stations = []
+    
+    if "ids" in request.query_params:
+        requested_stations = [s.strip().lower() for s in request.query_params["ids"].split(",")]
+    elif "stationString" in request.query_params:
+        requested_stations = [s.strip().lower() for s in request.query_params["stationString"].split(",")]
+
+    if not requested_stations:
+        # Fallback to proxy if we can't identify the station
+        return await aviationweather_proxy(request, request.url.path.lstrip("/"))
+
+    # 2. DETERMINE DATA TYPE (METAR vs TAF)
+    is_taf = "taf" in request.url.path or request.query_params.get("dataSource", "") == "tafs"
+    source_data = taf_data if is_taf else metar_data
+    
+    # 3. DETERMINE OUTPUT FORMAT (JSON vs XML)
+    # New API defaults to JSON, Old to XML
+    fmt = request.query_params.get("format", "xml").lower()
+    if "/api/data/" in request.url.path and "format" not in request.query_params:
+        fmt = "json" 
+
+    # 4. COLLECT DATA
+    response_data = {}
+    for station in requested_stations:
+        if station in source_data:
+            response_data[station] = source_data[station]
+            print(f"Serving {'TAF' if is_taf else 'METAR'} for {station} ({fmt})...")
+
+    # 5. GENERATE RESPONSE
+    if fmt == "json":
+        json_content = generate_json(response_data)
+        return Response(content=json.dumps(json_content), status_code=200, media_type="application/json")
+    else:
+        datasource_name = "tafs" if is_taf else "metars"
+        tree = generate_xml(response_data, datasource=datasource_name)
+
+    return Response(content=ET.tostring(tree.getroot(), encoding="utf-8"), status_code=200, media_type="application/xml")
+
+@app.get("/cgi-bin/data/metar.php")
+@app.get("/api/data/metar")
+async def request_raw_metar(ids):
+    """Serves specific raw METARs"""
+    stationString = ids.lower()
+    if stationString in metar_data:
+        print(f"Serving raw METAR for {stationString}...")
+        return Response(content=metar_data[stationString], status_code=200)
+    return Response(content="Station not found!", status_code=404)
 
 # Everything else is forwarded to aviationweather.gov
 @app.api_route("/{path_name:path}", methods=["GET"])

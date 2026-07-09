@@ -1,6 +1,6 @@
-fastapi==0.115.6
+fastapi==0.124.4
 metar==1.11.0
-Requests==2.32.3
+requests==2.32.5
 requests_toolbelt==1.0.0
-uvicorn==0.34.0
-watchfiles==1.0.4
+uvicorn==0.38.0
+watchfiles==1.1.1
